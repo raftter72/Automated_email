@@ -61,9 +61,7 @@ def przygotuj_wiadomosc(konto, raw):
 
     # POPRAWKA SMTP 550:
     # Reply-To musi pasowac do konta nadawczego.
-    msg["Reply-To"] = konto["user"]
-
-    # Oryginalny nadawca pozostaje w tresci
+      # Oryginalny nadawca pozostaje w tresci
     naglowek = (
         f"Wiadomosc przekazana ze skrzynki: {konto['nazwa']}\n"
         f"Oryginalny nadawca: {od}\n"
