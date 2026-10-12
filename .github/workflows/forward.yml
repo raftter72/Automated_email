@@ -1,0 +1,23 @@
+name: Forward mail
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:   # pozwala uruchomić ręcznie przyciskiem
+
+jobs:
+  forward:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python forward.py
+        env:
+          YAHOO_USER: ${{ secrets.YAHOO_USER }}
+          YAHOO_PASS: ${{ secrets.YAHOO_PASS }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_PASS: ${{ secrets.WP_PASS }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
