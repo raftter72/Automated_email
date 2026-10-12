@@ -1,4 +1,4 @@
-import imaplib, smtplib, email, os, sys, time
+import imaplib, smtplib, email, os, sys, time, html
 from datetime import datetime, timedelta, timezone
 from email import policy
 from email.message import EmailMessage
@@ -16,24 +16,36 @@ KONTA = [
 
 def przeslij(smtp, nazwa, raw):
     orig = email.message_from_bytes(raw, policy=policy.default)
-    naglowek = f"Od: {orig.get('From', '?')}\nData: {orig.get('Date', '?')}\n\n"
+    od = orig.get("From", "?")
+    data = orig.get("Date", "?")
+    naglowek = f"Od: {od}\nData: {data}\n\n"
 
     msg = EmailMessage()
     msg["From"] = GMAIL_USER
     msg["To"] = GMAIL_USER
     msg["Subject"] = f"[{nazwa}] {orig.get('Subject', '(bez tematu)')}"
+    if orig.get("Reply-To"):
+        msg["Reply-To"] = orig["Reply-To"]  # odpowiedź w Gmailu pójdzie do nadawcy
 
     body = orig.get_body(preferencelist=("plain", "html"))
     if body is None:
         msg.set_content(naglowek + "(brak treści)")
     elif body.get_content_type() == "text/html":
         msg.set_content(naglowek + "(wiadomość HTML)")
-        msg.add_alternative(body.get_content(), subtype="html")
+        info = f"<p><b>Od:</b> {html.escape(str(od))}<br><b>Data:</b> {html.escape(str(data))}</p><hr>"
+        msg.add_alternative(info + body.get_content(), subtype="html")
     else:
         msg.set_content(naglowek + body.get_content())
 
-    msg.add_attachment(raw, maintype="application", subtype="octet-stream",
-                       filename="oryginal.eml")
+    # przekazujemy tylko oryginalne załączniki (jeśli są), bez pliku .eml
+    for zal in orig.iter_attachments():
+        dane = zal.get_payload(decode=True)
+        if not dane:
+            continue
+        maintype, subtype = zal.get_content_type().split("/", 1)
+        msg.add_attachment(dane, maintype=maintype, subtype=subtype,
+                           filename=zal.get_filename() or "zalacznik")
+
     smtp.send_message(msg)
 
 
