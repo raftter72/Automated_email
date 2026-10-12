@@ -14,7 +14,8 @@ from email import policy
 from email.message import EmailMessage
 from email.utils import formataddr
 
-OKNO_MIN = 1440  # 24 godziny
+# Sprawdzaj wiadomosci z ostatnich 24 godzin
+OKNO_MIN = 1440
 
 GMAIL_USER = os.environ["GMAIL_USER"]
 
@@ -49,17 +50,20 @@ def przygotuj_wiadomosc(konto, raw):
 
     msg = EmailMessage()
 
+    # Nadawca to konto Yahoo lub WP
     msg["From"] = formataddr((
         konto["wyswietlana_nazwa"],
         konto["user"]
     ))
+
     msg["To"] = GMAIL_USER
     msg["Subject"] = temat
 
-    reply = orig.get("Reply-To") or orig.get("From")
-    if reply:
-        msg["Reply-To"] = str(reply)
+    # POPRAWKA SMTP 550:
+    # Reply-To musi pasowac do konta nadawczego.
+    msg["Reply-To"] = konto["user"]
 
+    # Oryginalny nadawca pozostaje w tresci
     naglowek = (
         f"Wiadomosc przekazana ze skrzynki: {konto['nazwa']}\n"
         f"Oryginalny nadawca: {od}\n"
@@ -71,16 +75,22 @@ def przygotuj_wiadomosc(konto, raw):
     )
 
     if body is None:
-        msg.set_content(naglowek + "(brak tresci)")
+        msg.set_content(
+            naglowek + "(brak tresci)"
+        )
 
     elif body.get_content_type() == "text/html":
-        msg.set_content(naglowek + "(wiadomosc HTML)")
+        msg.set_content(
+            naglowek + "(wiadomosc HTML)"
+        )
 
         info = (
             f"<p><b>Skrzynka:</b> "
             f"{html.escape(konto['nazwa'])}<br>"
-            f"<b>Od:</b> {html.escape(od)}<br>"
-            f"<b>Data:</b> {html.escape(data)}</p><hr>"
+            f"<b>Oryginalny nadawca:</b> "
+            f"{html.escape(od)}<br>"
+            f"<b>Data:</b> "
+            f"{html.escape(data)}</p><hr>"
         )
 
         msg.add_alternative(
@@ -93,15 +103,19 @@ def przygotuj_wiadomosc(konto, raw):
             naglowek + body.get_content()
         )
 
+    # Zachowaj zalaczniki
     for zal in orig.iter_attachments():
         dane = zal.get_payload(decode=True)
 
         if dane is None:
             continue
 
-        maintype, subtype = (
-            zal.get_content_type().split("/", 1)
-        )
+        typ = zal.get_content_type()
+
+        if "/" not in typ:
+            typ = "application/octet-stream"
+
+        maintype, subtype = typ.split("/", 1)
 
         msg.add_attachment(
             dane,
@@ -115,7 +129,9 @@ def przygotuj_wiadomosc(konto, raw):
 
 def bezpieczny_komunikat(s):
     if isinstance(s, bytes):
-        s = s.decode("utf-8", errors="replace")
+        s = s.decode(
+            "utf-8", errors="replace"
+        )
 
     s = str(s)
 
@@ -126,14 +142,20 @@ def bezpieczny_komunikat(s):
         s
     )
 
-    # Ukryj ewentualne wartosci sekretow
+    # Ukryj dane poufne
     for nazwa in (
-        "YAHOO_PASS", "WP_PASS", "GMAIL_PASS",
-        "YAHOO_USER", "WP_USER", "GMAIL_USER"
+        "YAHOO_PASS",
+        "WP_PASS",
+        "GMAIL_PASS",
+        "YAHOO_USER",
+        "WP_USER",
+        "GMAIL_USER"
     ):
         sekret = os.environ.get(nazwa, "")
         if sekret:
-            s = s.replace(sekret, "[UKRYTE]")
+            s = s.replace(
+                sekret, "[UKRYTE]"
+            )
 
     return s[:350]
 
@@ -143,16 +165,20 @@ def pokaz_blad(nazwa, etap, e):
         f"{nazwa}: BLAD na etapie [{etap}]",
         flush=True
     )
+
     print(
         f"{nazwa}: typ bledu: {type(e).__name__}",
         flush=True
     )
 
-    if isinstance(e, smtplib.SMTPResponseException):
+    if isinstance(
+        e, smtplib.SMTPResponseException
+    ):
         print(
             f"{nazwa}: kod SMTP: {e.smtp_code}",
             flush=True
         )
+
         print(
             f"{nazwa}: odpowiedz SMTP: "
             f"{bezpieczny_komunikat(e.smtp_error)}",
@@ -165,7 +191,9 @@ def pokaz_blad(nazwa, etap, e):
             flush=True
         )
 
-    elif isinstance(e, (socket.timeout, TimeoutError, OSError)):
+    elif isinstance(
+        e, (socket.timeout, TimeoutError, OSError)
+    ):
         print(
             f"{nazwa}: blad polaczenia sieciowego",
             flush=True
@@ -180,29 +208,48 @@ def pokaz_blad(nazwa, etap, e):
 
 def obsluz_konto(konto):
     nazwa = konto["nazwa"]
+
     imap = None
     smtp = None
     etap = "start"
 
     try:
-        print(f"\n--- Konto: {nazwa} ---", flush=True)
+        print(
+            f"\n--- Konto: {nazwa} ---",
+            flush=True
+        )
 
         etap = "IMAP polaczenie"
+
         imap = imaplib.IMAP4_SSL(
-            konto["imap"], 993, timeout=30
+            konto["imap"],
+            993,
+            timeout=30
         )
 
         etap = "IMAP logowanie"
-        imap.login(konto["user"], konto["haslo"])
-        print(f"{nazwa}: IMAP OK", flush=True)
+
+        imap.login(
+            konto["user"],
+            konto["haslo"]
+        )
+
+        print(
+            f"{nazwa}: IMAP OK",
+            flush=True
+        )
 
         etap = "IMAP wybor INBOX"
+
         status, _ = imap.select(
-            "INBOX", readonly=False
+            "INBOX",
+            readonly=False
         )
 
         if status != "OK":
-            raise RuntimeError("INBOX niedostepny")
+            raise RuntimeError(
+                "INBOX niedostepny"
+            )
 
         od_daty = (
             datetime.now(timezone.utc)
@@ -210,8 +257,12 @@ def obsluz_konto(konto):
         ).strftime("%d-%b-%Y")
 
         etap = "IMAP wyszukiwanie"
+
         status, dane = imap.search(
-            None, "UNSEEN", "SINCE", od_daty
+            None,
+            "UNSEEN",
+            "SINCE",
+            od_daty
         )
 
         if status != "OK":
@@ -219,7 +270,11 @@ def obsluz_konto(konto):
                 "Wyszukiwanie IMAP nie powiodlo sie"
             )
 
-        numery = dane[0].split() if dane[0] else []
+        numery = (
+            dane[0].split()
+            if dane and dane[0]
+            else []
+        )
 
         print(
             f"{nazwa}: nieprzeczytane: {len(numery)}",
@@ -233,7 +288,8 @@ def obsluz_konto(konto):
             etap = "IMAP pobieranie"
 
             status, msg_data = imap.fetch(
-                num, "(INTERNALDATE BODY.PEEK[])"
+                num,
+                "(INTERNALDATE BODY.PEEK[])"
             )
 
             if status != "OK":
@@ -243,7 +299,8 @@ def obsluz_konto(konto):
 
             czesci = [
                 x for x in msg_data
-                if isinstance(x, tuple) and len(x) >= 2
+                if isinstance(x, tuple)
+                and len(x) >= 2
             ]
 
             if not czesci:
@@ -251,8 +308,10 @@ def obsluz_konto(konto):
                     "Brak danych wiadomosci"
                 )
 
-            czas_info = imaplib.Internaldate2tuple(
-                czesci[0][0]
+            czas_info = (
+                imaplib.Internaldate2tuple(
+                    czesci[0][0]
+                )
             )
 
             if czas_info is None:
@@ -260,15 +319,22 @@ def obsluz_konto(konto):
                     "Nieprawidlowa data IMAP"
                 )
 
-            czas = time.mktime(czas_info)
+            czas = time.mktime(
+                czas_info
+            )
 
-            if time.time() - czas > OKNO_MIN * 60:
+            if (
+                time.time() - czas
+                > OKNO_MIN * 60
+            ):
                 za_stare += 1
                 continue
 
             etap = "Przygotowanie wiadomosci"
+
             msg = przygotuj_wiadomosc(
-                konto, czesci[0][1]
+                konto,
+                czesci[0][1]
             )
 
             if smtp is None:
@@ -280,7 +346,9 @@ def obsluz_konto(konto):
                 )
 
                 smtp = smtplib.SMTP_SSL(
-                    konto["smtp"], 465, timeout=30
+                    konto["smtp"],
+                    465,
+                    timeout=30
                 )
 
                 print(
@@ -316,12 +384,15 @@ def obsluz_konto(konto):
             etap = "IMAP oznaczanie jako przeczytane"
 
             status, _ = imap.store(
-                num, "+FLAGS", r"(\Seen)"
+                num,
+                "+FLAGS",
+                r"(\Seen)"
             )
 
             if status != "OK":
                 raise RuntimeError(
-                    "Wyslano, ale nie oznaczono jako przeczytane"
+                    "Wyslano, ale nie oznaczono "
+                    "jako przeczytane"
                 )
 
             wyslane += 1
@@ -330,6 +401,7 @@ def obsluz_konto(konto):
             f"{nazwa}: za stare: {za_stare}",
             flush=True
         )
+
         print(
             f"{nazwa}: przeslano: {wyslane}",
             flush=True
@@ -338,7 +410,12 @@ def obsluz_konto(konto):
         return True
 
     except Exception as e:
-        pokaz_blad(nazwa, etap, e)
+        pokaz_blad(
+            nazwa,
+            etap,
+            e
+        )
+
         return False
 
     finally:
